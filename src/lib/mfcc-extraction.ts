@@ -74,9 +74,16 @@ const applySTFT = async (
   const complexOutput: { real: number[]; imag: number[] }[] = [];
   for (let i = 0; i < windowedFrames.length; i++) {
     const fft = await tf.spectral.rfft(tf.tensor1d(windowedFrames[i]));
-    const realValues = await fft.real().array() as number[];
-    const imagValues = await fft.imag().array() as number[];
-    complexOutput.push({ real: realValues, imag: imagValues });
+    
+    // Fix: Access tensor data safely
+    const realArray = await fft.real().array();
+    const imagArray = await fft.imag().array();
+    
+    complexOutput.push({ 
+      real: realArray as number[], 
+      imag: imagArray as number[] 
+    });
+    
     fft.dispose();
   }
   

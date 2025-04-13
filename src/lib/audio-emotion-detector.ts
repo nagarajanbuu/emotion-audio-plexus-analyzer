@@ -25,6 +25,7 @@ export const initAudioEmotionDetector = async (): Promise<boolean> => {
     
     if (modelType === 'tfjs') {
       // Use TensorFlow.js for speech commands recognition
+      // Note: We need to explicitly import the package with a dynamic import
       const speechCommands = await import('@tensorflow-models/speech-commands');
       const recognizer = speechCommands.create(
         'BROWSER_FFT', // Using browser's Fast Fourier Transform
