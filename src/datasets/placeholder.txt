@@ -1,0 +1,2 @@
+
+This directory contains emotion recognition datasets (RAVDESS and CREMA-D)
