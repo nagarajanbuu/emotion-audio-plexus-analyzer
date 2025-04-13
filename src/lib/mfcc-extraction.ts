@@ -1,4 +1,3 @@
-
 // MFCC Feature Extraction
 // This file handles Mel-frequency cepstral coefficients extraction for audio processing
 
@@ -48,6 +47,16 @@ export const extractMFCC = async (audioData: Float32Array): Promise<Float32Array
   return mfcc;
 };
 
+// Extract frames from audio data
+export const extractFrames = (audioData: Float32Array, frameLength: number, hopLength: number) => {
+  const frames = [];
+  for (let i = 0; i < audioData.length - frameLength; i += hopLength) {
+    const frame = audioData.slice(i, i + frameLength);
+    frames.push(frame);
+  }
+  return frames;
+};
+
 // Apply Short-time Fourier transform (STFT)
 const applySTFT = async (
   audioData: Float32Array,
@@ -58,11 +67,7 @@ const applySTFT = async (
   const numFrames = Math.floor((audioData.length - fftSize) / hopLength) + 1;
   
   // Create frames
-  const frames: Float32Array[] = [];
-  for (let i = 0; i < numFrames; i++) {
-    const frame = audioData.slice(i * hopLength, i * hopLength + fftSize);
-    frames.push(frame);
-  }
+  const frames = extractFrames(audioData, fftSize, hopLength);
   
   // Apply window function (Hann window)
   const windowFunction = hannWindow(fftSize);
@@ -71,21 +76,7 @@ const applySTFT = async (
   });
   
   // Apply FFT to each frame
-  const complexOutput: { real: number[]; imag: number[] }[] = [];
-  for (let i = 0; i < windowedFrames.length; i++) {
-    const fft = await tf.spectral.rfft(tf.tensor1d(windowedFrames[i]));
-    
-    // Fix: Access tensor data safely
-    const realArray = await fft.real().array();
-    const imagArray = await fft.imag().array();
-    
-    complexOutput.push({ 
-      real: realArray as number[], 
-      imag: imagArray as number[] 
-    });
-    
-    fft.dispose();
-  }
+  const complexOutput = await applyFFT(windowedFrames);
   
   // Create tensors for real and imaginary parts
   const realTensor = tf.tensor2d(complexOutput.map(c => c.real));
@@ -99,6 +90,26 @@ const applySTFT = async (
   imagTensor.dispose();
   
   return result as tf.Tensor2D;
+};
+
+// Apply Fast Fourier Transform
+export const applyFFT = async (windowedFrames: number[][]) => {
+  const complexOutput: { real: number[]; imag: number[] }[] = [];
+  for (let i = 0; i < windowedFrames.length; i++) {
+    const fft = await tf.spectral.rfft(tf.tensor1d(windowedFrames[i]));
+    
+    // Get real and imaginary components safely
+    const realValues = Array.from(await fft.real().data());
+    const imagValues = Array.from(await fft.imag().data());
+    
+    complexOutput.push({ 
+      real: realValues, 
+      imag: imagValues 
+    });
+    
+    fft.dispose();
+  }
+  return complexOutput;
 };
 
 // Create a Hann window function

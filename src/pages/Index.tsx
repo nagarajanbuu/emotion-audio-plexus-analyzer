@@ -2,6 +2,9 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Link } from 'react-router-dom';
+import { InfoIcon } from 'lucide-react';
 import Header from '@/components/Header';
 import AudioAnalyzer from '@/components/AudioAnalyzer';
 import VideoAnalyzer from '@/components/VideoAnalyzer';
@@ -69,6 +72,16 @@ const Index = () => {
       <Header />
       
       <main className="container px-4 py-8">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold">Emotion Recognition</h1>
+          <Button variant="outline" asChild>
+            <Link to="/datasets" className="flex items-center gap-2">
+              <InfoIcon className="h-4 w-4" />
+              <span>Dataset Info</span>
+            </Link>
+          </Button>
+        </div>
+        
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-8">
             <AudioAnalyzer onEmotionDetected={handleAudioEmotionDetected} />

@@ -1,6 +1,6 @@
-
 import * as tf from '@tensorflow/tfjs';
 import { getSelectedModel, prepareAudioDataForModel } from './audio-emotion-utils';
+import { analyzeAudioEmotion } from './emotion-recognition';
 import type { EmotionResult } from '@/types/emotion';
 
 // Global variables for the model
@@ -9,17 +9,17 @@ let isListening = false;
 let audioContext: AudioContext | null = null;
 let mediaStreamSource: MediaStreamAudioSourceNode | null = null;
 let analyzer: AnalyserNode | null = null;
-let onEmotionDetected: ((result: EmotionResult) => void) | null = null;
+let onEmotionDetected: ((emotion: any) => void) | null = null;
 
 // Initialize the audio emotion detector
-export const initAudioEmotionDetector = async (): Promise<boolean> => {
+export const initAudioEmotionDetector = async () => {
   try {
     // Clear any existing models
     if (model) {
       model.dispose();
       model = null;
     }
-    
+
     // Load the model based on selection
     const modelType = getSelectedModel();
     
@@ -33,12 +33,10 @@ export const initAudioEmotionDetector = async (): Promise<boolean> => {
         'https://storage.googleapis.com/tfjs-models/tfjs/speech-commands/v0.4/browser_fft/18w/metadata.json',
         'https://storage.googleapis.com/tfjs-models/tfjs/speech-commands/v0.4/browser_fft/18w/model.json'
       );
-      
       await recognizer.ensureModelLoaded();
       
-      // Store the model for later use
-      model = recognizer.modelWithoutHeadsOrWeights;
-      
+      // Store the model - use the base model
+      model = recognizer.model;
       return true;
     } else {
       // Load custom model using TensorFlow.js
@@ -47,6 +45,7 @@ export const initAudioEmotionDetector = async (): Promise<boolean> => {
         return true;
       } catch (error) {
         console.error('Failed to load custom model, using fallback model:', error);
+        
         // Use a simplified model as fallback
         model = tf.sequential({
           layers: [
@@ -73,190 +72,158 @@ export const initAudioEmotionDetector = async (): Promise<boolean> => {
   }
 };
 
-// Start listening for audio and detecting emotions in real-time
-export const startListening = async (
-  callback: (result: EmotionResult) => void
-): Promise<boolean> => {
+// Start listening to audio
+export const startListening = async (callback: (emotion: EmotionResult) => void) => {
+  if (isListening) {
+    console.warn('Already listening, stop existing listener first.');
+    return false;
+  }
+  
   if (!model) {
-    console.error('Model not initialized. Call initAudioEmotionDetector first.');
+    console.error('Model not loaded. Call initAudioEmotionDetector first.');
     return false;
   }
   
   try {
-    // Set up audio context
-    audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    
-    mediaStreamSource = audioContext.createMediaStreamSource(stream);
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
     analyzer = audioContext.createAnalyser();
     analyzer.fftSize = 2048;
     
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaStreamSource = audioContext.createMediaStreamSource(stream);
     mediaStreamSource.connect(analyzer);
     
-    // Set the callback
-    onEmotionDetected = callback;
+    const bufferLength = analyzer.frequencyBinCount;
+    const dataArray = new Float32Array(bufferLength);
+    
     isListening = true;
+    onEmotionDetected = callback;
     
-    // Start processing audio data
-    processAudioData();
+    const processFrame = () => {
+      if (!isListening || !analyzer || !onEmotionDetected) {
+        return;
+      }
+      
+      analyzer.getFloatFrequencyData(dataArray);
+      
+      // Normalize audio data
+      const normalizedData = dataArray.map(value => value / 100);
+      
+      // Prepare audio data for the model
+      const preparedData = prepareAudioDataForModel(normalizedData);
+      
+      if (preparedData) {
+        // Make a prediction with the model
+        tf.tidy(() => {
+          if (model) {
+            const prediction = model.predict(preparedData) as tf.Tensor;
+            
+            // Convert the prediction to emotion results
+            getEmotionResults(prediction).then(emotionResult => {
+              if (onEmotionDetected) {
+                onEmotionDetected(emotionResult);
+              }
+            });
+          }
+        });
+      }
+      
+      requestAnimationFrame(processFrame);
+    };
     
+    processFrame();
     return true;
   } catch (error) {
-    console.error('Error starting audio emotion detection:', error);
+    console.error('Error starting audio capture:', error);
     return false;
   }
 };
 
-// Stop listening for audio
+// Stop listening to audio
 export const stopListening = () => {
   isListening = false;
-  
-  if (audioContext && audioContext.state !== 'closed') {
-    if (mediaStreamSource) {
-      mediaStreamSource.disconnect();
-      mediaStreamSource = null;
-    }
-  }
-  
   onEmotionDetected = null;
-};
-
-// Process audio data in real-time
-const processAudioData = async () => {
-  if (!isListening || !analyzer || !audioContext || !onEmotionDetected) return;
   
-  const bufferLength = analyzer.frequencyBinCount;
-  const dataArray = new Float32Array(bufferLength);
-  
-  // Get audio data
-  analyzer.getFloatTimeDomainData(dataArray);
-  
-  // Only process audio if there's significant audio (not silence)
-  const volume = calculateRMS(dataArray);
-  
-  if (volume > 0.01) { // Threshold for "not silence"
-    try {
-      // Prepare the audio data for the model
-      const processedData = await prepareAudioDataForModel(dataArray, audioContext.sampleRate);
-      
-      if (processedData) {
-        // Detect emotion
-        const emotion = await detectEmotion(processedData);
-        if (emotion) {
-          onEmotionDetected(emotion);
-        }
-      }
-    } catch (error) {
-      console.error('Error processing audio data:', error);
-    }
+  if (mediaStreamSource) {
+    mediaStreamSource.disconnect();
+    mediaStreamSource = null;
   }
   
-  // Continue processing if still listening
-  if (isListening) {
-    requestAnimationFrame(processAudioData);
+  if (analyzer) {
+    analyzer.disconnect();
+    analyzer = null;
+  }
+  
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
   }
 };
 
-// Calculate root mean square (RMS) to determine volume
-const calculateRMS = (buffer: Float32Array): number => {
-  let sum = 0;
-  for (let i = 0; i < buffer.length; i++) {
-    sum += buffer[i] * buffer[i];
-  }
-  return Math.sqrt(sum / buffer.length);
-};
-
-// Process an audio blob for emotion detection
+// Process audio blob for emotion recognition
 export const processAudioBlob = async (audioBlob: Blob): Promise<EmotionResult | null> => {
   if (!model) {
-    console.error('Model not initialized. Call initAudioEmotionDetector first.');
+    console.error('Model not loaded. Call initAudioEmotionDetector first.');
     return null;
   }
   
   try {
-    // Convert blob to array buffer
+    // Convert the audio blob to an audio buffer
     const arrayBuffer = await audioBlob.arrayBuffer();
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+      const context = new AudioContext();
+      context.decodeAudioData(arrayBuffer, resolve, reject);
+    });
     
-    // Decode the audio data
-    const audioData = await audioContext.decodeAudioData(arrayBuffer);
-    const rawData = audioData.getChannelData(0);
+    // Extract audio data from the buffer
+    const audioData = audioBuffer.getChannelData(0);
     
-    // Prepare the audio data for the model
-    const processedData = await prepareAudioDataForModel(rawData, audioData.sampleRate);
+    // Prepare audio data for the model
+    const preparedData = prepareAudioDataForModel(audioData);
     
-    if (!processedData) return null;
-    
-    // Detect emotion
-    return await detectEmotion(processedData);
-    
+    if (preparedData) {
+      // Make a prediction with the model
+      const prediction = model.predict(preparedData) as tf.Tensor;
+      
+      // Convert the prediction to emotion results
+      const emotionResult = await getEmotionResults(prediction);
+      
+      // Return the emotion result
+      return emotionResult;
+    } else {
+      console.warn('No prepared data to process.');
+      return null;
+    }
   } catch (error) {
     console.error('Error processing audio blob:', error);
     return null;
   }
 };
 
-// Detect emotion from audio data using the loaded model
-const detectEmotion = async (audioData: Float32Array): Promise<EmotionResult | null> => {
-  try {
-    if (!model) return null;
-    
-    const modelType = getSelectedModel();
-    let emotionScores: number[] = [];
-    
-    if (modelType === 'tfjs') {
-      // Use a simplified approach for demo purposes
-      // Convert to tensor with shape expected by the model
-      const inputTensor = tf.tensor(audioData).reshape([1, 40, 1]);
-      
-      // Run inference
-      const prediction = model.predict(inputTensor) as tf.Tensor;
-      
-      // Get the predicted class probabilities
-      emotionScores = Array.from(prediction.dataSync());
-      
-      // Clean up tensors
-      inputTensor.dispose();
-      prediction.dispose();
-    } else {
-      // Simulated emotion scores for fallback
-      emotionScores = [0.2, 0.2, 0.2, 0.2, 0.2]; // Equal probabilities for all emotions
-      
-      // Randomly increase one emotion for demo purposes
-      const randomEmotion = Math.floor(Math.random() * 5);
-      emotionScores[randomEmotion] += 0.3;
-      
-      // Normalize to sum to 1
-      const sum = emotionScores.reduce((a, b) => a + b, 0);
-      emotionScores = emotionScores.map(score => score / sum);
-    }
-    
-    // Map emotion indices to emotion names
-    const emotionLabels: EmotionResult['emotions'] = [
-      { emotion: 'happy', score: emotionScores[0] || 0.1 },
-      { emotion: 'sad', score: emotionScores[1] || 0.1 },
-      { emotion: 'neutral', score: emotionScores[2] || 0.5 },
-      { emotion: 'angry', score: emotionScores[3] || 0.2 },
-      { emotion: 'fear', score: emotionScores[4] || 0.1 }
-    ];
-    
-    // Find the dominant emotion
-    let dominantEmotion = emotionLabels[0];
-    for (let i = 1; i < emotionLabels.length; i++) {
-      if (emotionLabels[i].score > dominantEmotion.score) {
-        dominantEmotion = emotionLabels[i];
-      }
-    }
-    
-    return {
-      dominantEmotion: dominantEmotion.emotion,
-      emotions: emotionLabels,
-      source: 'audio',
-      timestamp: Date.now(),
-      model: modelType === 'tfjs' ? 'tensorflow/speech-commands' : 'custom-audio-model'
-    };
-  } catch (error) {
-    console.error('Error detecting emotion from audio:', error);
-    return null;
-  }
+// Get emotion results from the model prediction
+const getEmotionResults = async (prediction: tf.Tensor): Promise<EmotionResult> => {
+  const emotionProbabilities = await prediction.data() as Float32Array;
+  
+  // Define emotion labels
+  const emotionLabels = ['happy', 'sad', 'neutral', 'angry', 'fear'];
+  
+  // Map emotion probabilities to labels
+  const emotions = emotionLabels.map((emotion, index) => ({
+    emotion: emotion,
+    score: emotionProbabilities[index]
+  }));
+  
+  // Get the dominant emotion
+  const dominantEmotion = emotions.reduce((prev, current) => (prev.score > current.score) ? prev : current).emotion;
+  
+  // Create the emotion result object
+  const emotionResult: EmotionResult = {
+    dominantEmotion: dominantEmotion,
+    emotions: emotions,
+    source: 'audio',
+    timestamp: Date.now(),
+    model: getSelectedModel()
+  };
+  
+  return emotionResult;
 };
