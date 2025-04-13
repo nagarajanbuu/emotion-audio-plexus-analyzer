@@ -88,7 +88,7 @@ export const useVideoRecorder = (onEmotionDetected: (emotion: EmotionResult) => 
       };
       
       // Handle recording stop
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         // Create video blob
         const videoBlob = new Blob(chunksRef.current, { type: 'video/webm' });
         
@@ -105,6 +105,7 @@ export const useVideoRecorder = (onEmotionDetected: (emotion: EmotionResult) => 
         
         // Process the video for emotion detection
         setIsProcessing(true);
+        
         try {
           // Process with Face-API.js
           let result: EmotionResult | null = null;
@@ -113,8 +114,14 @@ export const useVideoRecorder = (onEmotionDetected: (emotion: EmotionResult) => 
             videoRef.current.src = videoURL;
             videoRef.current.muted = false;
             
+            // Create a File object from the Blob for compatibility
+            const fileFromBlob = new File([videoBlob], "recorded-video.webm", { 
+              type: "video/webm",
+              lastModified: Date.now()
+            });
+            
             result = await processVideoFile(
-              videoBlob, 
+              fileFromBlob,
               (progress) => console.log(`Processing: ${progress}%`),
               videoRef.current
             );

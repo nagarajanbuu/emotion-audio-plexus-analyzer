@@ -117,7 +117,7 @@ const EmotionDisplay = ({ emotionData }: EmotionDisplayProps) => {
                 )}
                 style={{ 
                   width: animate ? '100%' : '0%', 
-                  transitionDelay: `${index * 100}ms` 
+                  transitionDelay: `${index * 100}ms`
                 }}
               />
             </div>

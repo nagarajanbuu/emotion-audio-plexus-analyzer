@@ -1,6 +1,5 @@
-
 import * as faceapi from 'face-api.js';
-import type { EmotionResult } from '@/types/emotion';
+import type { EmotionResult, EmotionType } from '@/types/emotion';
 
 // Global variables
 let modelsLoaded = false;
@@ -111,7 +110,7 @@ export const stopVideoProcessing = (): void => {
 
 // Process a video file for emotion detection
 export const processVideoFile = async (
-  videoFile: File,
+  videoFile: File | Blob,
   onProgress: (progress: number) => void,
   videoElement: HTMLVideoElement
 ): Promise<EmotionResult | null> => {
