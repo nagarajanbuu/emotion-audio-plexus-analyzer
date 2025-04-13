@@ -1,3 +1,4 @@
+
 // MFCC Feature Extraction
 // This file handles Mel-frequency cepstral coefficients extraction for audio processing
 
@@ -96,18 +97,18 @@ const applySTFT = async (
 export const applyFFT = async (windowedFrames: number[][]) => {
   const complexOutput: { real: number[]; imag: number[] }[] = [];
   for (let i = 0; i < windowedFrames.length; i++) {
-    const fft = await tf.spectral.rfft(tf.tensor1d(windowedFrames[i]));
+    const fftResult = await tf.spectral.rfft(tf.tensor1d(windowedFrames[i]));
     
-    // Get real and imaginary components safely
-    const realValues = Array.from(await fft.real().data());
-    const imagValues = Array.from(await fft.imag().data());
+    // Get real and imaginary components safely using typed arrays
+    const realValues: number[] = Array.from(await fftResult.real().array() as Float32Array);
+    const imagValues: number[] = Array.from(await fftResult.imag().array() as Float32Array);
     
     complexOutput.push({ 
       real: realValues, 
       imag: imagValues 
     });
     
-    fft.dispose();
+    fftResult.dispose();
   }
   return complexOutput;
 };

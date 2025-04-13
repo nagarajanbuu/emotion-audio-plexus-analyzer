@@ -18,11 +18,8 @@ export const setSelectedModel = (model: string) => {
 };
 
 // Utility function to convert audio data to the format needed for model inference
-export const prepareAudioDataForModel = async (audioData: Float32Array, sampleRate: number) => {
+export const prepareAudioDataForModel = (audioData: Float32Array, sampleRate: number = 22050) => {
   try {
-    // We'll use TensorFlow.js for audio processing
-    const { tensor } = await import('@tensorflow/tfjs');
-    
     // Assume a standard length for the audio data
     const standardLength = 22050; // 1 second at 22050Hz
     

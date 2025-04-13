@@ -1,7 +1,8 @@
+
 import * as tf from '@tensorflow/tfjs';
 import { getSelectedModel, prepareAudioDataForModel } from './audio-emotion-utils';
 import { analyzeAudioEmotion } from './emotion-recognition';
-import type { EmotionResult } from '@/types/emotion';
+import type { EmotionResult, EmotionType, EmotionScore } from '@/types/emotion';
 
 // Global variables for the model
 let model: tf.LayersModel | null = null;
@@ -9,7 +10,7 @@ let isListening = false;
 let audioContext: AudioContext | null = null;
 let mediaStreamSource: MediaStreamAudioSourceNode | null = null;
 let analyzer: AnalyserNode | null = null;
-let onEmotionDetected: ((emotion: any) => void) | null = null;
+let onEmotionDetected: ((emotion: EmotionResult) => void) | null = null;
 
 // Initialize the audio emotion detector
 export const initAudioEmotionDetector = async () => {
@@ -36,7 +37,7 @@ export const initAudioEmotionDetector = async () => {
       await recognizer.ensureModelLoaded();
       
       // Store the model - use the base model
-      model = recognizer.model;
+      model = recognizer.model as tf.LayersModel;
       return true;
     } else {
       // Load custom model using TensorFlow.js
@@ -85,7 +86,8 @@ export const startListening = async (callback: (emotion: EmotionResult) => void)
   }
   
   try {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    // Use AudioContext without webkitAudioContext fallback (modern browsers all support AudioContext)
+    audioContext = new AudioContext();
     analyzer = audioContext.createAnalyser();
     analyzer.fftSize = 2048;
     
@@ -109,14 +111,15 @@ export const startListening = async (callback: (emotion: EmotionResult) => void)
       // Normalize audio data
       const normalizedData = dataArray.map(value => value / 100);
       
-      // Prepare audio data for the model
-      const preparedData = prepareAudioDataForModel(normalizedData);
+      // Prepare audio data for the model - convert to sample rate expected by model (22050Hz)
+      const preparedData = prepareAudioDataForModel(normalizedData, 22050);
       
       if (preparedData) {
         // Make a prediction with the model
         tf.tidy(() => {
           if (model) {
-            const prediction = model.predict(preparedData) as tf.Tensor;
+            const tensorData = tf.tensor(preparedData).reshape([1, 40, 1]);
+            const prediction = model.predict(tensorData) as tf.Tensor;
             
             // Convert the prediction to emotion results
             getEmotionResults(prediction).then(emotionResult => {
@@ -170,23 +173,25 @@ export const processAudioBlob = async (audioBlob: Blob): Promise<EmotionResult |
   try {
     // Convert the audio blob to an audio buffer
     const arrayBuffer = await audioBlob.arrayBuffer();
-    const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
-      const context = new AudioContext();
-      context.decodeAudioData(arrayBuffer, resolve, reject);
-    });
+    const audioContext = new AudioContext();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
     
     // Extract audio data from the buffer
     const audioData = audioBuffer.getChannelData(0);
     
-    // Prepare audio data for the model
-    const preparedData = prepareAudioDataForModel(audioData);
+    // Prepare audio data for the model with proper sample rate
+    const preparedData = prepareAudioDataForModel(audioData, audioBuffer.sampleRate);
     
     if (preparedData) {
       // Make a prediction with the model
-      const prediction = model.predict(preparedData) as tf.Tensor;
+      const tensorData = tf.tensor(preparedData).reshape([1, 40, 1]);
+      const prediction = model.predict(tensorData) as tf.Tensor;
       
       // Convert the prediction to emotion results
       const emotionResult = await getEmotionResults(prediction);
+      
+      // Clean up
+      tensorData.dispose();
       
       // Return the emotion result
       return emotionResult;
@@ -204,11 +209,11 @@ export const processAudioBlob = async (audioBlob: Blob): Promise<EmotionResult |
 const getEmotionResults = async (prediction: tf.Tensor): Promise<EmotionResult> => {
   const emotionProbabilities = await prediction.data() as Float32Array;
   
-  // Define emotion labels
-  const emotionLabels = ['happy', 'sad', 'neutral', 'angry', 'fear'];
+  // Define emotion labels (must match EmotionType)
+  const emotionLabels: EmotionType[] = ['happy', 'sad', 'neutral', 'angry', 'fear'];
   
   // Map emotion probabilities to labels
-  const emotions = emotionLabels.map((emotion, index) => ({
+  const emotions: EmotionScore[] = emotionLabels.map((emotion, index) => ({
     emotion: emotion,
     score: emotionProbabilities[index]
   }));
