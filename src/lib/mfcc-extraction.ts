@@ -97,17 +97,21 @@ const applySTFT = async (
 export const applyFFT = async (windowedFrames: number[][]) => {
   const complexOutput: { real: number[]; imag: number[] }[] = [];
   for (let i = 0; i < windowedFrames.length; i++) {
-    const fftResult = await tf.spectral.rfft(tf.tensor1d(windowedFrames[i]));
+    const frame = windowedFrames[i];
+    const frameTensor = tf.tensor1d(frame);
+    const fftResult = await tf.spectral.rfft(frameTensor);
     
-    // Get real and imaginary components safely using typed arrays
-    const realValues: number[] = Array.from(await fftResult.real().array() as Float32Array);
-    const imagValues: number[] = Array.from(await fftResult.imag().array() as Float32Array);
+    // Extract real and imaginary components safely
+    const realArray = await fftResult.real().array() as number[];
+    const imagArray = await fftResult.imag().array() as number[];
     
     complexOutput.push({ 
-      real: realValues, 
-      imag: imagValues 
+      real: Array.from(realArray), 
+      imag: Array.from(imagArray) 
     });
     
+    // Clean up tensors
+    frameTensor.dispose();
     fftResult.dispose();
   }
   return complexOutput;

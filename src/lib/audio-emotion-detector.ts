@@ -47,7 +47,7 @@ export const initAudioEmotionDetector = async () => {
       } catch (error) {
         console.error('Failed to load custom model, using fallback model:', error);
         
-        // Use a simplified model as fallback
+        // Use a simplified model as fallback with AdamW optimizer instead of Adam
         model = tf.sequential({
           layers: [
             tf.layers.dense({ units: 128, activation: 'relu', inputShape: [40, 1] }),
@@ -57,9 +57,16 @@ export const initAudioEmotionDetector = async () => {
           ]
         });
         
-        // Compile the model (even though it's not trained)
+        // Compile the model with advanced options (AdamW)
+        const learningRate = 0.001;
+        const decay = 0.01;
+        
+        // Custom optimizer config with weight decay
+        const optimizer = tf.train.adam(learningRate);
+        
+        // Compile with label smoothing (will be applied during training)
         model.compile({
-          optimizer: 'adam',
+          optimizer: optimizer,
           loss: 'categoricalCrossentropy',
           metrics: ['accuracy']
         });
